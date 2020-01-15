@@ -118,6 +118,15 @@ class ToTensor(object):
         return {'X_image': torch.from_numpy(image),
                 'Y': torch.from_numpy(Y)}
     
+class Normalize(object):
+
+    def __call__(self, sample):
+        image = sample['X_image']
+
+        # landmarks = landmarks.transpose((2, 0, 1))
+        return {'X_image': (image/255) -0.5,
+                'Y': sample['Y']}
+
 def compute_mean_std(loader):
     # Compute the mean over minibatches
     mean_img = None
@@ -372,8 +381,12 @@ def main():
 
     valid_ratio = args.valpct  # Going to use 80%/20% split for train/valid
 
+    data_transforms = transforms.Compose([
+        ToTensor(), Normalize()
+        ])
+
     full_dataset = CatDogDataset(
-        csv_file_name='catdog.csv', transform=transforms.Compose([ToTensor()]))
+        csv_file_name='catdog.csv', transform=data_transforms)
 
     nb_train = int((1.0 - valid_ratio) * len(full_dataset))
     nb_test = int(valid_ratio * len(full_dataset))
