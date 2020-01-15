@@ -12,9 +12,11 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import pandas as pd
 import time
+import sys
+# import csv
 
 # set to true to one once, then back to false unless you want to change something in your training data.
-CREATE_CSV = False
+CREATE_CSV = True
 PATH_DATA = "../DATA"
 PATH_CAT = "/PetImages/Cat"
 PATH_DOG = "/PetImages/Dog"
@@ -40,6 +42,8 @@ def make_csv(data_path, list_label_path):
                         dict_csv['file_name'].append(path)
                         dict_csv['label'].append(np.eye(len(list_label_path))[
                                                  dict_label[path_label]])
+                        # print(np.eye(len(list_label_path))[dict_label[path_label]])
+                        # print(type(np.eye(len(list_label_path))[dict_label[path_label]]))
                     except Exception as e:
                         pass
 
@@ -70,17 +74,22 @@ class CatDogDataset(Dataset):
     def __getitem__(self, idx):
         # if torch.is_tensor(idx):
         #     idx = idx.tolist()
+        # print(self.data_frame.head())
 
         img_name = os.path.join(self.data_frame.iloc[idx, 0])
         X = cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
         X = cv2.resize(X, (self.IMG_SIZE, self.IMG_SIZE))
         Y = self.data_frame.iloc[idx, 1]
-        Y = np.array([Y])
+        Y =Y.replace(" ", ",")
+        # Y = np.array([Y])
+        # Y = Y.astype(np.array)
+        Y = np.asarray(eval(Y))
+        # print("type", type(Y))
         sample = {'X_image': np.array(X), 'Y': Y}
 
         if self.transform:
             sample = self.transform(sample)
-
+        
         # return sample
         return (sample['X_image'], sample['Y'])
 
@@ -94,10 +103,43 @@ class ToTensor(object):
         # swap color axis because
         # numpy image: H x W x C
         # torch image: C X H X W
-        image = image.transpose((2, 0, 1))
+        # print(type(image.shape))
+        # print(len(image.shape))
+        # print(Y)
+
+        
+        if len(image.shape) == 3:
+            print(image.shape)
+            image = image.transpose((2, 0, 1))
+        elif len(image.shape) == 2:
+            image = np.array([image])
+
         # landmarks = landmarks.transpose((2, 0, 1))
-        return {'image': torch.from_numpy(image),
-                'landmarks': torch.from_numpy(Y)}
+        return {'X_image': torch.from_numpy(image),
+                'Y': torch.from_numpy(Y)}
+    
+def compute_mean_std(loader):
+    # Compute the mean over minibatches
+    mean_img = None
+    for imgs, _ in loader:
+        if mean_img is None:
+            mean_img = torch.zeros_like(imgs[0])
+        mean_img += imgs.sum(dim=0)
+    mean_img /= len(loader.dataset)
+
+    # Compute the std over minibatches
+    std_img = torch.zeros_like(mean_img)
+    for imgs, _ in loader:
+        std_img += ((imgs - mean_img)**2).sum(dim=0)
+    std_img /= len(loader.dataset)
+    std_img = torch.sqrt(std_img)
+
+    # Set the variance of pixels with no variance to 1
+    # Because there is no variance
+    # these pixels will anyway have no impact on the final decision
+    std_img[std_img == 0] = 1
+
+    return mean_img, std_img
 
 
 class Net(nn.Module):
@@ -134,6 +176,44 @@ class Net(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.fc2(x)  # bc this is our output layer. No activation here.
         return F.softmax(x, dim=1)
+
+
+class CNN(nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()
+
+        self.conv1 = nn.Conv2d(
+                in_channels=1,              # input height
+                out_channels=16,            # n_filters
+                kernel_size=5,              # filter size
+                stride=1,                   # filter movement/step
+                padding=2,                  # if want same width and length of this image after Conv2d, padding=(kernel_size-1)/2 if stride=1
+            )
+
+        self.conv2 = nn.Conv2d(16, 32, 5, 1, 2)
+
+        self.layer1 = nn.Sequential(         # input shape (1, 28, 28)
+            self.conv1,                     # output shape (16, 28, 28)
+            nn.ReLU(),                      # activation
+            nn.MaxPool2d(kernel_size=2),    # choose max value in 2x2 area, output shape (16, 14, 14)
+        )
+        self.layer2 = nn.Sequential(         # input shape (16, 14, 14)
+            self.conv2,                     # output shape (32, 14, 14)
+            nn.ReLU(),                      # activation
+            nn.MaxPool2d(2),                # output shape (32, 7, 7)
+        )
+        self.out = nn.Linear(32 * 7 * 7, 10)   # fully connected layer, output 10 classes
+
+    def penalty(self):
+        return self.l2_reg * (self.conv1.weight.norm(2) + self.conv2.weight.norm(2))
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = x.view(x.size(0), -1)           # flatten the output of conv2 to (batch_size, 32 * 7 * 7)
+        output = self.out(x)
+        # return output, x    # return x for visualization
+        return F.softmax(output, dim = 1)
     
 def train(model, loader, f_loss, optimizer, device):
     """
@@ -270,7 +350,7 @@ def main():
                         help="number of batch")
     parser.add_argument("--valpct", type=float, default=0.2,
                         help="proportion of test data")
-    parser.add_argument("--num_thread", type=int, default=1,
+    parser.add_argument("--num_threads", type=int, default=1,
                         help="number of thread used")
     parser.add_argument("--create_csv", type=bool, default=False,
                         help="create or not csv file")
@@ -293,7 +373,7 @@ def main():
     valid_ratio = args.valpct  # Going to use 80%/20% split for train/valid
 
     full_dataset = CatDogDataset(
-        csv_file_name='training_data.csv', transform=transforms.Compose([ToTensor]))
+        csv_file_name='catdog.csv', transform=transforms.Compose([ToTensor()]))
 
     nb_train = int((1.0 - valid_ratio) * len(full_dataset))
     nb_test = int(valid_ratio * len(full_dataset))
@@ -302,17 +382,36 @@ def main():
     train_dataset, test_dataset = torch.utils.data.dataset.random_split(
         full_dataset, [nb_train, nb_test])
 
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                               batch_size=args.batch,
-                                               shuffle=True,
-                                               num_workers=args.num_threads)
+    print("Test lenght: ", len(train_dataset))
+    print("Test lenght: ", len(test_dataset))
 
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                               batch_size=args.batch,
-                                               shuffle=True,
-                                               num_workers=args.num_threads)
+    # train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
+    #                                            batch_size=args.batch,
+    #                                            shuffle=True,
+    #                                            num_workers=args.num_threads)
 
-    model = Net()
+    # test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
+    #                                            batch_size=args.batch,
+    #                                            shuffle=True,
+    #                                            num_workers=args.num_threads)
+    train_loader = DataLoader(dataset=train_dataset,
+                            batch_size=args.batch,
+                            shuffle=True,
+                            num_workers=args.num_threads)
+
+    test_loader = DataLoader(dataset=test_dataset,
+                            batch_size=args.batch,
+                            shuffle=True,
+                            num_workers=args.num_threads)
+
+    # for (inputs, targets) in train_loader:
+    #     print("input:\n",input)
+    #     print("target\n", targets)
+
+    #     break
+
+    # model = Net()
+    model  = CNN()
     print("Network architechture:\n",model)
 
     use_gpu = torch.cuda.is_available()
@@ -332,7 +431,7 @@ def main():
         os.mkdir(top_logdir)
     model_checkpoint = ModelCheckpoint(top_logdir + "/best_model.pt", model)
 
-    for t in tqdm(range(args.epochs)):
+    for t in tqdm(range(args.epoch)):
         print("Epoch {}".format(t))
         train_loss, train_acc = train(model, train_loader, f_loss, optimizer, device)
         
