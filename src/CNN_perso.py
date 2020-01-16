@@ -38,10 +38,19 @@ def make_csv(data_path, list_label_path):
             for f in tqdm(os.listdir(path_label)):
                 if "jpg" in f:
                     try:
+                        
                         path = os.path.join(path_label, f)
-                        dict_csv['file_name'].append(path)
-                        dict_csv['label'].append(np.eye(len(list_label_path))[
-                                                 dict_label[path_label]])
+                        X = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+                        if(X is None):
+                            print("This image is corrupted: ",path)
+                        else:
+                            dict_csv['file_name'].append(path)
+
+                            dict_csv['label'].append(np.eye(len(list_label_path))[
+                                                    dict_label[path_label]])
+
+                        # dict_csv['label'].append(dict_label[path_label])             
+                        #         
                         # print(np.eye(len(list_label_path))[dict_label[path_label]])
                         # print(type(np.eye(len(list_label_path))[dict_label[path_label]]))
                     except Exception as e:
@@ -66,7 +75,7 @@ class CatDogDataset(Dataset):
         """
         self.data_frame = pd.read_csv(csv_file_name)
         self.transform = transform
-        self.IMG_SIZE = 50
+        self.IMG_SIZE = 28
 
     def __len__(self):
         return len(self.data_frame)
@@ -77,14 +86,23 @@ class CatDogDataset(Dataset):
         # print(self.data_frame.head())
 
         img_name = os.path.join(self.data_frame.iloc[idx, 0])
+        # print("image name: ", img_name)
         X = cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
+
+        if(X is None):
+            print("This image is None: image name: ",img_name)
+            assert (not X is None)
         X = cv2.resize(X, (self.IMG_SIZE, self.IMG_SIZE))
+        # print(X)
+
         Y = self.data_frame.iloc[idx, 1]
         Y =Y.replace(" ", ",")
-        # Y = np.array([Y])
-        # Y = Y.astype(np.array)
         Y = np.asarray(eval(Y))
-        # print("type", type(Y))
+        # print(type(Y))
+        # print("Y: ",Y)
+
+        # assert (type(Y) == np.int64)
+
         sample = {'X_image': np.array(X), 'Y': Y}
 
         if self.transform:
@@ -115,8 +133,17 @@ class ToTensor(object):
             image = np.array([image])
 
         # landmarks = landmarks.transpose((2, 0, 1))
+        # return {'X_image': torch.from_numpy(image),
+        #         'Y': torch.from_numpy(Y).long()}
+
         return {'X_image': torch.from_numpy(image),
-                'Y': torch.from_numpy(Y)}
+                'Y': torch.from_numpy(Y).float()}
+
+        # print("Y torch ", Y)
+        # print(torch.LongTensor(np.array([Y])))
+
+        # return {'X_image': torch.from_numpy(image),
+        #         'Y': torch.LongTensor(np.array([Y])).float()}
     
 class Normalize(object):
 
@@ -126,6 +153,17 @@ class Normalize(object):
         # landmarks = landmarks.transpose((2, 0, 1))
         return {'X_image': (image/255) -0.5,
                 'Y': sample['Y']}
+
+class CrossEntropyOneHot(object):
+
+
+    def __call__(self, sample):
+        _, labels = sample['Y'].max(dim=0)
+        # landmarks = landmarks.transpose((2, 0, 1))
+        return {'X_image': sample['X_image'],
+                'Y': labels}
+
+
 
 def compute_mean_std(loader):
     # Compute the mean over minibatches
@@ -149,6 +187,10 @@ def compute_mean_std(loader):
     std_img[std_img == 0] = 1
 
     return mean_img, std_img
+
+def cross_entropy_one_hot(input, target):
+    _, labels = target.max(dim=0)
+    return nn.CrossEntropyLoss()(input, labels)
 
 
 class Net(nn.Module):
@@ -191,6 +233,8 @@ class CNN(nn.Module):
     def __init__(self):
         super(CNN, self).__init__()
 
+        self.l2_reg = 0.001
+
         self.conv1 = nn.Conv2d(
                 in_channels=1,              # input height
                 out_channels=16,            # n_filters
@@ -211,7 +255,7 @@ class CNN(nn.Module):
             nn.ReLU(),                      # activation
             nn.MaxPool2d(2),                # output shape (32, 7, 7)
         )
-        self.out = nn.Linear(32 * 7 * 7, 10)   # fully connected layer, output 10 classes
+        self.out = nn.Linear(32 * 7 * 7, 2)   # fully connected layer, output 10 classes
 
     def penalty(self):
         return self.l2_reg * (self.conv1.weight.norm(2) + self.conv2.weight.norm(2))
@@ -254,10 +298,18 @@ def train(model, loader, f_loss, optimizer, device):
 
         # Compute the forward pass through the network up to the loss
         outputs = model(inputs)
+
+        # _, target_entropy = targets.max(dim = 0)
+
         loss = f_loss(outputs, targets)
         N += inputs.shape[0]
         tot_loss += inputs.shape[0] * f_loss(outputs, targets).item()
+        # tot_loss += inputs.shape[0] * f_loss(outputs, ).item()
+        # print("Output: ", outputs)
         predicted_targets = outputs.argmax(dim=1)
+        targets = targets.argmax(dim=1)
+        # print("Predicted target ",predicted_targets)
+        # print("target ",targets)
         correct += (predicted_targets == targets).sum().item()
         
         # Backward and optimize
@@ -319,6 +371,7 @@ def test(model, loader, f_loss, device):
             # But given the softmax is not altering the rank of its input scores
             # we can compute the label by argmaxing directly the scores
             predicted_targets = outputs.argmax(dim=1)
+            targets = targets.argmax(dim=1)
             correct += (predicted_targets == targets).sum().item()
         return tot_loss/N, correct/N
 
@@ -389,14 +442,16 @@ def main():
         csv_file_name='catdog.csv', transform=data_transforms)
 
     nb_train = int((1.0 - valid_ratio) * len(full_dataset))
-    nb_test = int(valid_ratio * len(full_dataset))
+    # nb_test = int(valid_ratio * len(full_dataset))
+    nb_test = len(full_dataset) - nb_train
+    print("Size of full data set: ",len(full_dataset))
     print("Size of training data: ", nb_train)
     print("Size of testing data: ", nb_test)
     train_dataset, test_dataset = torch.utils.data.dataset.random_split(
         full_dataset, [nb_train, nb_test])
 
-    print("Test lenght: ", len(train_dataset))
-    print("Test lenght: ", len(test_dataset))
+    # print("Test lenght: ", len(train_dataset))
+    # print("Test lenght: ", len(test_dataset))
 
     # train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
     #                                            batch_size=args.batch,
@@ -418,7 +473,7 @@ def main():
                             num_workers=args.num_threads)
 
     # for (inputs, targets) in train_loader:
-    #     print("input:\n",input)
+    #     # print("input:\n",input)
     #     print("target\n", targets)
 
     #     break
@@ -435,7 +490,8 @@ def main():
 
     model.to(device)
 
-    f_loss = torch.nn.CrossEntropyLoss()
+    # f_loss = torch.nn.CrossEntropyLoss()
+    f_loss = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters())
 
 
