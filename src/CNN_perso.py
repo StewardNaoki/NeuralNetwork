@@ -20,6 +20,7 @@ CREATE_CSV = True
 PATH_DATA = "../DATA"
 PATH_CAT = "/PetImages/Cat"
 PATH_DOG = "/PetImages/Dog"
+MODEL_PATH = "./../log/fc1/best_model.pt"
 
 
 def make_csv(data_path, list_label_path):
@@ -365,6 +366,8 @@ def test(model, loader, f_loss, device):
             # We need to copy the data on the GPU if we use one
             inputs, targets = inputs.to(device), targets.to(device)
 
+            _, target_max = targets.max(dim=1)
+
             # Compute the forward pass, i.e. the scores for each input image
             outputs = model(inputs)
 
@@ -374,7 +377,7 @@ def test(model, loader, f_loss, device):
             # We accumulate the loss considering
             # The multipliation by inputs.shape[0] is due to the fact
             # that our loss criterion is averaging over its samples
-            tot_loss += inputs.shape[0] * f_loss(outputs, targets).item()
+            tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
 
             # For the accuracy, we compute the labels for each input image
             # Be carefull, the model is outputing scores and not the probabilities
@@ -417,15 +420,15 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--epoch", type=int, default=1,
-                        help="number of epoch")
+                        help="number of epoch (default: 1)")
     parser.add_argument("--batch", type=int, default=100,
-                        help="number of batch")
+                        help="number of batch (default: 100)")
     parser.add_argument("--valpct", type=float, default=0.2,
-                        help="proportion of test data")
+                        help="proportion of test data (default: 0.2)")
     parser.add_argument("--num_threads", type=int, default=1,
-                        help="number of thread used")
+                        help="number of thread used (default: 1)")
     parser.add_argument("--create_csv", type=bool, default=False,
-                        help="create or not csv file")
+                        help="create or not csv file (default: False)")
 
     # parser.add_argument("--n", type=int, default = 100,
 #             help="number of generated samples")
@@ -533,6 +536,7 @@ def main():
         # tensorboard_writer.add_scalar('metrics/val_loss', val_loss, t)
         # tensorboard_writer.add_scalar('metrics/val_acc',  val_acc, t)
 
+    model.load_state_dict(torch.load(MODEL_PATH))
     test_loss, test_acc = test(model, test_loader, f_loss, device)
     print(" Test       : Loss : {:.4f}, Acc : {:.4f}".format(test_loss, test_acc))
 
