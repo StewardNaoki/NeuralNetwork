@@ -76,7 +76,7 @@ class CatDogDataset(Dataset):
         """
         self.data_frame = pd.read_csv(csv_file_name)
         self.transform = transform
-        self.IMG_SIZE = 28
+        self.IMG_SIZE = 52
 
     def __len__(self):
         return len(self.data_frame)
@@ -256,7 +256,7 @@ class CNN(nn.Module):
             nn.ReLU(),                      # activation
             nn.MaxPool2d(2),                # output shape (32, 7, 7)
         )
-        self.out = nn.Linear(32 * 7 * 7, 2)   # fully connected layer, output 10 classes
+        self.out = nn.Linear(32*13*13, 2)   # fully connected layer, output 10 classes
 
     def penalty(self):
         return self.l2_reg * (self.conv1.weight.norm(2) + self.conv2.weight.norm(2))
@@ -293,41 +293,43 @@ def train(model, loader, f_loss, optimizer, device):
     
     N = 0
     tot_loss, correct = 0.0, 0.0
-    
-    for i, (inputs, targets) in tqdm(enumerate(loader)):
-        inputs, targets = inputs.to(device), targets.to(device)
+    with tqdm(total=len(loader)) as pbar:
+        for i, (inputs, targets) in enumerate(loader):
+            pbar.update(1)
+            pbar.set_description("Training step {}".format(i))
+            inputs, targets = inputs.to(device), targets.to(device)
 
-        # Compute the forward pass through the network up to the loss
-        outputs = model(inputs)
+            # Compute the forward pass through the network up to the loss
+            outputs = model(inputs)
 
-        # print("target ",targets)
-        # print("output ",outputs)
+            # print("target ",targets)
+            # print("output ",outputs)
 
-        # _, target_entropy = targets.max(dim = 0)
-        # outputs = outputs.float()
-        targets = targets.float()
-        # _, output_max = outputs.max(dim=0)
-        _, target_max = targets.max(dim=1)
+            # _, target_entropy = targets.max(dim = 0)
+            # outputs = outputs.float()
+            # targets = targets.float()
+            # _, output_max = outputs.max(dim=0)
+            _, target_max = targets.max(dim=1)
 
-        # print("target ",target_max)
-        # print("output ",outputs)
+            # print("target ",target_max)
+            # print("output ",outputs)
 
-        loss = f_loss(outputs, target_max)
-        N += inputs.shape[0]
-        tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
-        # tot_loss += inputs.shape[0] * f_loss(outputs, ).item()
-        # print("Output: ", outputs)
-        predicted_targets = outputs.argmax(dim=1)
-        # targets = targets.argmax(dim=1)
-        # print("Predicted target ",predicted_targets)
-        # print("target ",targets)
-        correct += (predicted_targets == target_max).sum().item()
-        
-        # Backward and optimize
-        optimizer.zero_grad()
-        loss.backward()
-        model.penalty().backward()
-        optimizer.step()
+            loss = f_loss(outputs, target_max)
+            N += inputs.shape[0]
+            tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
+            # tot_loss += inputs.shape[0] * f_loss(outputs, ).item()
+            # print("Output: ", outputs)
+            predicted_targets = outputs.argmax(dim=1)
+            # targets = targets.argmax(dim=1)
+            # print("Predicted target ",predicted_targets)
+            # print("target ",targets)
+            correct += (predicted_targets == target_max).sum().item()
+            
+            # Backward and optimize
+            optimizer.zero_grad()
+            loss.backward()
+            model.penalty().backward()
+            optimizer.step()
         
     return tot_loss/N, correct/N
     
@@ -356,37 +358,39 @@ def test(model, loader, f_loss, device):
         model.eval()
         N = 0
         tot_loss, correct = 0.0, 0.0
-        for i, (inputs, targets) in tqdm(enumerate(loader)):
+        with tqdm(total=len(loader)) as pbar:
+            for i, (inputs, targets) in enumerate(loader):
+                pbar.update(1)
+                pbar.set_description("Testing step {}".format(i))
+                # We got a minibatch from the loader within inputs and targets
+                # With a mini batch size of 128, we have the following shapes
+                #    inputs is of shape (128, 1, 28, 28)
+                #    targets is of shape (128)
 
-            # We got a minibatch from the loader within inputs and targets
-            # With a mini batch size of 128, we have the following shapes
-            #    inputs is of shape (128, 1, 28, 28)
-            #    targets is of shape (128)
+                # We need to copy the data on the GPU if we use one
+                inputs, targets = inputs.to(device), targets.to(device)
 
-            # We need to copy the data on the GPU if we use one
-            inputs, targets = inputs.to(device), targets.to(device)
+                _, target_max = targets.max(dim=1)
 
-            _, target_max = targets.max(dim=1)
+                # Compute the forward pass, i.e. the scores for each input image
+                outputs = model(inputs)
 
-            # Compute the forward pass, i.e. the scores for each input image
-            outputs = model(inputs)
+                # We accumulate the exact number of processed samples
+                N += inputs.shape[0]
 
-            # We accumulate the exact number of processed samples
-            N += inputs.shape[0]
+                # We accumulate the loss considering
+                # The multipliation by inputs.shape[0] is due to the fact
+                # that our loss criterion is averaging over its samples
+                tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
 
-            # We accumulate the loss considering
-            # The multipliation by inputs.shape[0] is due to the fact
-            # that our loss criterion is averaging over its samples
-            tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
-
-            # For the accuracy, we compute the labels for each input image
-            # Be carefull, the model is outputing scores and not the probabilities
-            # But given the softmax is not altering the rank of its input scores
-            # we can compute the label by argmaxing directly the scores
-            predicted_targets = outputs.argmax(dim=1)
-            targets = targets.argmax(dim=1)
-            correct += (predicted_targets == targets).sum().item()
-        return tot_loss/N, correct/N
+                # For the accuracy, we compute the labels for each input image
+                # Be carefull, the model is outputing scores and not the probabilities
+                # But given the softmax is not altering the rank of its input scores
+                # we can compute the label by argmaxing directly the scores
+                predicted_targets = outputs.argmax(dim=1)
+                targets = targets.argmax(dim=1)
+                correct += (predicted_targets == targets).sum().item()
+            return tot_loss/N, correct/N
 
 class ModelCheckpoint:
 
