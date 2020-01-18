@@ -293,7 +293,7 @@ def train(model, loader, f_loss, optimizer, device):
     N = 0
     tot_loss, correct = 0.0, 0.0
     
-    for i, (inputs, targets) in enumerate(loader):
+    for i, (inputs, targets) in tqdm(enumerate(loader)):
         inputs, targets = inputs.to(device), targets.to(device)
 
         # Compute the forward pass through the network up to the loss
@@ -303,20 +303,24 @@ def train(model, loader, f_loss, optimizer, device):
         # print("output ",outputs)
 
         # _, target_entropy = targets.max(dim = 0)
+        # outputs = outputs.float()
+        targets = targets.float()
+        # _, output_max = outputs.max(dim=0)
+        _, target_max = targets.max(dim=1)
 
-        _, output_max = outputs.max(dim=0)
-        _, target_max = targets.max(dim=0)
+        # print("target ",target_max)
+        # print("output ",outputs)
 
-        loss = f_loss(output_max, target_max)
+        loss = f_loss(outputs, target_max)
         N += inputs.shape[0]
-        tot_loss += inputs.shape[0] * f_loss(outputs, targets).item()
+        tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
         # tot_loss += inputs.shape[0] * f_loss(outputs, ).item()
         # print("Output: ", outputs)
         predicted_targets = outputs.argmax(dim=1)
-        targets = targets.argmax(dim=1)
+        # targets = targets.argmax(dim=1)
         # print("Predicted target ",predicted_targets)
         # print("target ",targets)
-        correct += (predicted_targets == targets).sum().item()
+        correct += (predicted_targets == target_max).sum().item()
         
         # Backward and optimize
         optimizer.zero_grad()
@@ -351,7 +355,7 @@ def test(model, loader, f_loss, device):
         model.eval()
         N = 0
         tot_loss, correct = 0.0, 0.0
-        for i, (inputs, targets) in enumerate(loader):
+        for i, (inputs, targets) in tqdm(enumerate(loader)):
 
             # We got a minibatch from the loader within inputs and targets
             # With a mini batch size of 128, we have the following shapes
@@ -496,8 +500,8 @@ def main():
 
     model.to(device)
 
-    # f_loss = torch.nn.CrossEntropyLoss()
-    f_loss = nn.MSELoss()
+    f_loss = torch.nn.CrossEntropyLoss()
+    # f_loss = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters())
 
 
