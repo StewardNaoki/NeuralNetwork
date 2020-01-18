@@ -76,7 +76,7 @@ class CatDogDataset(Dataset):
         """
         self.data_frame = pd.read_csv(csv_file_name)
         self.transform = transform
-        self.IMG_SIZE = 52
+        self.IMG_SIZE = 64
 
     def __len__(self):
         return len(self.data_frame)
@@ -262,7 +262,7 @@ class CNN(nn.Module):
             nn.ReLU(),                      # activation
             nn.MaxPool2d(2),                # output shape (32, 7, 7)
         )
-        self.fc1 = nn.Linear(128*4*4, 512)   # fully connected layer, output 10 classes
+        self.fc1 = nn.Linear(128*8*8, 512)   # fully connected layer, output 10 classes
         self.fc2 = nn.Linear(512, 2)   # fully connected layer, output 10 classes
 
     def penalty(self):
