@@ -299,9 +299,15 @@ def train(model, loader, f_loss, optimizer, device):
         # Compute the forward pass through the network up to the loss
         outputs = model(inputs)
 
+        # print("target ",targets)
+        # print("output ",outputs)
+
         # _, target_entropy = targets.max(dim = 0)
 
-        loss = f_loss(outputs, targets)
+        _, output_max = outputs.max(dim=0)
+        _, target_max = targets.max(dim=0)
+
+        loss = f_loss(output_max, target_max)
         N += inputs.shape[0]
         tot_loss += inputs.shape[0] * f_loss(outputs, targets).item()
         # tot_loss += inputs.shape[0] * f_loss(outputs, ).item()

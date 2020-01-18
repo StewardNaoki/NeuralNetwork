@@ -135,3 +135,4 @@ dmypy.json
 *.npy
 DATA/
 *.csv
+*.pt
