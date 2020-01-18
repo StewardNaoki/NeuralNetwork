@@ -238,13 +238,14 @@ class CNN(nn.Module):
 
         self.conv1 = nn.Conv2d(
                 in_channels=1,              # input height
-                out_channels=16,            # n_filters
+                out_channels=32,            # n_filters
                 kernel_size=5,              # filter size
                 stride=1,                   # filter movement/step
                 padding=2,                  # if want same width and length of this image after Conv2d, padding=(kernel_size-1)/2 if stride=1
             )
 
-        self.conv2 = nn.Conv2d(16, 32, 5, 1, 2)
+        self.conv2 = nn.Conv2d(32, 64, 5, 1, 2)
+        self.conv3 = nn.Conv2d(64, 128, 5, 1, 2)
 
         self.layer1 = nn.Sequential(         # input shape (1, 28, 28)
             self.conv1,                     # output shape (16, 28, 28)
@@ -256,7 +257,13 @@ class CNN(nn.Module):
             nn.ReLU(),                      # activation
             nn.MaxPool2d(2),                # output shape (32, 7, 7)
         )
-        self.out = nn.Linear(32*13*13, 2)   # fully connected layer, output 10 classes
+        self.layer3 = nn.Sequential(         # input shape (16, 14, 14)
+            self.conv3,                     # output shape (32, 14, 14)
+            nn.ReLU(),                      # activation
+            nn.MaxPool2d(2),                # output shape (32, 7, 7)
+        )
+        self.fc1 = nn.Linear(128*4*4, 512)   # fully connected layer, output 10 classes
+        self.fc2 = nn.Linear(512, 2)   # fully connected layer, output 10 classes
 
     def penalty(self):
         return self.l2_reg * (self.conv1.weight.norm(2) + self.conv2.weight.norm(2))
@@ -264,8 +271,10 @@ class CNN(nn.Module):
     def forward(self, x):
         x = self.layer1(x)
         x = self.layer2(x)
+        x = self.layer3(x)
         x = x.view(x.size(0), -1)           # flatten the output of conv2 to (batch_size, 32 * 7 * 7)
-        output = self.out(x)
+        x = self.fc1(x)
+        output = self.fc2(x)
         # return output, x    # return x for visualization
         return F.softmax(output, dim = 1)
     
@@ -297,6 +306,7 @@ def train(model, loader, f_loss, optimizer, device):
         for i, (inputs, targets) in enumerate(loader):
             pbar.update(1)
             pbar.set_description("Training step {}".format(i))
+
             inputs, targets = inputs.to(device), targets.to(device)
 
             # Compute the forward pass through the network up to the loss
@@ -326,8 +336,8 @@ def train(model, loader, f_loss, optimizer, device):
             correct += (predicted_targets == target_max).sum().item()
             
             # Backward and optimize
-            # optimizer.zero_grad()
-            model.zero_grad()
+            optimizer.zero_grad()
+            # model.zero_grad()
             loss.backward()
             # model.penalty().backward()
             optimizer.step()
