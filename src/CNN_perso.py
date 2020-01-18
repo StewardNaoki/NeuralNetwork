@@ -309,7 +309,7 @@ def train(model, loader, f_loss, optimizer, device):
             # outputs = outputs.float()
             # targets = targets.float()
             # _, output_max = outputs.max(dim=0)
-            _, target_max = targets.max(dim=1)
+            target_max = targets.argmax(dim=1)
 
             # print("target ",target_max)
             # print("output ",outputs)
@@ -326,9 +326,10 @@ def train(model, loader, f_loss, optimizer, device):
             correct += (predicted_targets == target_max).sum().item()
             
             # Backward and optimize
-            optimizer.zero_grad()
+            # optimizer.zero_grad()
+            model.zero_grad()
             loss.backward()
-            model.penalty().backward()
+            # model.penalty().backward()
             optimizer.step()
         
     return tot_loss/N, correct/N
@@ -370,7 +371,7 @@ def test(model, loader, f_loss, device):
                 # We need to copy the data on the GPU if we use one
                 inputs, targets = inputs.to(device), targets.to(device)
 
-                _, target_max = targets.max(dim=1)
+                target_max = targets.argmax(dim=1)
 
                 # Compute the forward pass, i.e. the scores for each input image
                 outputs = model(inputs)
@@ -388,8 +389,7 @@ def test(model, loader, f_loss, device):
                 # But given the softmax is not altering the rank of its input scores
                 # we can compute the label by argmaxing directly the scores
                 predicted_targets = outputs.argmax(dim=1)
-                targets = targets.argmax(dim=1)
-                correct += (predicted_targets == targets).sum().item()
+                correct += (predicted_targets == target_max).sum().item()
             return tot_loss/N, correct/N
 
 class ModelCheckpoint:
