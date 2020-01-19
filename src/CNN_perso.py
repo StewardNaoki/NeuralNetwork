@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import argparse
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 import pandas as pd
 import time
@@ -21,6 +22,11 @@ PATH_DATA = "../DATA"
 PATH_CAT = "/PetImages/Cat"
 PATH_DOG = "/PetImages/Dog"
 MODEL_PATH = "./../log/fc1/best_model.pt"
+LOG_DIR = "./../log/"
+FC1 = "fc1/"
+BEST_MODELE = "best_model.pt"
+METRICS = "metrics/"
+tensorboard_writer   = SummaryWriter(log_dir = LOG_DIR)
 
 
 def make_csv(data_path, list_label_path):
@@ -34,10 +40,16 @@ def make_csv(data_path, list_label_path):
 
     print(dict_label)
 
+    
+
     for path_label in dict_label:
             print(path_label)
+
+            i = 0
+
             for f in tqdm(os.listdir(path_label)):
-                if "jpg" in f:
+                if "jpg" in f and i < 10:
+                    i += 1
                     try:
                         
                         path = os.path.join(path_label, f)
@@ -56,10 +68,13 @@ def make_csv(data_path, list_label_path):
                         # print(type(np.eye(len(list_label_path))[dict_label[path_label]]))
                     except Exception as e:
                         pass
+                else:
+                    break
 
     df = pd.DataFrame(dict_csv)
     df = df.sample(frac=1).reset_index(drop=True)
     print(df.head())
+    print(df)
     df.to_csv('catdog.csv', index=False)
 
 
@@ -95,6 +110,9 @@ class CatDogDataset(Dataset):
             assert (not X is None)
         X = cv2.resize(X, (self.IMG_SIZE, self.IMG_SIZE))
         # print(X)
+        # cv2.imshow('TEST', X)
+        # print(X.mean())
+        # cv2.waitKey(0)
 
         Y = self.data_frame.iloc[idx, 1]
         Y =Y.replace(" ", ",")
@@ -126,18 +144,23 @@ class ToTensor(object):
         # print(len(image.shape))
         # print(Y)
 
+        # print("image1: ",image)
+        # print(image.shape)
+
         
         if len(image.shape) == 3:
             print(image.shape)
             image = image.transpose((2, 0, 1))
         elif len(image.shape) == 2:
             image = np.array([image])
+        # print("image2: ",image)
+        # print(image.shape)
 
         # landmarks = landmarks.transpose((2, 0, 1))
         # return {'X_image': torch.from_numpy(image),
         #         'Y': torch.from_numpy(Y).long()}
 
-        return {'X_image': torch.from_numpy(image),
+        return {'X_image': torch.from_numpy(image).float(),
                 'Y': torch.from_numpy(Y).float()}
 
         # print("Y torch ", Y)
@@ -262,6 +285,8 @@ class CNN(nn.Module):
             nn.ReLU(),                      # activation
             nn.MaxPool2d(2),                # output shape (32, 7, 7)
         )
+
+        
         self.fc1 = nn.Linear(128*8*8, 512)   # fully connected layer, output 10 classes
         self.fc2 = nn.Linear(512, 2)   # fully connected layer, output 10 classes
 
@@ -312,6 +337,15 @@ def train(model, loader, f_loss, optimizer, device):
             # Compute the forward pass through the network up to the loss
             outputs = model(inputs)
 
+            # print(inputs[0][0])
+            # print(inputs[0][0].mean())
+            # print(inputs.shape)
+
+            # print(inputs.dtype)
+            # print("max ",inputs.max())
+            # print("min ",inputs.min())
+            # print("*")
+
             # print("target ",targets)
             # print("output ",outputs)
 
@@ -325,23 +359,27 @@ def train(model, loader, f_loss, optimizer, device):
             # print("output ",outputs)
 
             loss = f_loss(outputs, target_max)
+            # print("Loss: ", loss)
             N += inputs.shape[0]
             tot_loss += inputs.shape[0] * f_loss(outputs, target_max).item()
-            # tot_loss += inputs.shape[0] * f_loss(outputs, ).item()
+            
             # print("Output: ", outputs)
             predicted_targets = outputs.argmax(dim=1)
             # targets = targets.argmax(dim=1)
             # print("Predicted target ",predicted_targets)
             # print("target ",targets)
             correct += (predicted_targets == target_max).sum().item()
-            
+
+
+            # print("Correct: ", correct)
+            # print("N: ", N)
+
             # Backward and optimize
             optimizer.zero_grad()
             # model.zero_grad()
             loss.backward()
             # model.penalty().backward()
-            optimizer.step()
-        
+            optimizer.step()   
     return tot_loss/N, correct/N
     
 
@@ -384,7 +422,7 @@ def test(model, loader, f_loss, device):
                 target_max = targets.argmax(dim=1)
 
                 # Compute the forward pass, i.e. the scores for each input image
-                outputs = model(inputs)
+                outputs = model(inputs) 
 
                 # We accumulate the exact number of processed samples
                 N += inputs.shape[0]
@@ -400,7 +438,8 @@ def test(model, loader, f_loss, device):
                 # we can compute the label by argmaxing directly the scores
                 predicted_targets = outputs.argmax(dim=1)
                 correct += (predicted_targets == target_max).sum().item()
-            return tot_loss/N, correct/N
+
+    return tot_loss/N, correct/N
 
 class ModelCheckpoint:
 
@@ -477,18 +516,6 @@ def main():
     train_dataset, test_dataset = torch.utils.data.dataset.random_split(
         full_dataset, [nb_train, nb_test])
 
-    # print("Test lenght: ", len(train_dataset))
-    # print("Test lenght: ", len(test_dataset))
-
-    # train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-    #                                            batch_size=args.batch,
-    #                                            shuffle=True,
-    #                                            num_workers=args.num_threads)
-
-    # test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-    #                                            batch_size=args.batch,
-    #                                            shuffle=True,
-    #                                            num_workers=args.num_threads)
     train_loader = DataLoader(dataset=train_dataset,
                             batch_size=args.batch,
                             shuffle=True,
@@ -500,12 +527,10 @@ def main():
                             num_workers=args.num_threads)
 
     # for (inputs, targets) in train_loader:
-    #     # print("input:\n",input)
+    #     print("input:\n",inputs)
     #     print("target\n", targets)
 
-    #     break
-
-    # model = Net()
+ 
     model  = CNN()
     print("Network architechture:\n",model)
 
@@ -521,14 +546,17 @@ def main():
     # f_loss = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters())
 
+    
 
-    top_logdir = './../log/fc1'
+
+    top_logdir = LOG_DIR + FC1
     if not os.path.exists(top_logdir):
         os.mkdir(top_logdir)
-    model_checkpoint = ModelCheckpoint(top_logdir + "/best_model.pt", model)
+    model_checkpoint = ModelCheckpoint(top_logdir + BEST_MODELE, model)
 
     for t in tqdm(range(args.epoch)):
-        print("Epoch {}".format(t))
+        # pbar.set_description("Epoch Number{}".format(t))
+        print("######### Epoch Number: {} #########".format(t))
         train_loss, train_acc = train(model, train_loader, f_loss, optimizer, device)
         
         progress(train_loss, train_acc)
@@ -545,10 +573,10 @@ def main():
     #        os.mkdir(logdir)
         model_checkpoint.update(val_loss)
         
-        # tensorboard_writer.add_scalar('metrics/train_loss', train_loss, t)
-        # tensorboard_writer.add_scalar('metrics/train_acc',  train_acc, t)
-        # tensorboard_writer.add_scalar('metrics/val_loss', val_loss, t)
-        # tensorboard_writer.add_scalar('metrics/val_acc',  val_acc, t)
+        tensorboard_writer.add_scalar(METRICS + 'train_loss', train_loss, t)
+        tensorboard_writer.add_scalar(METRICS + 'train_acc',  train_acc, t)
+        tensorboard_writer.add_scalar(METRICS + 'val_loss', val_loss, t)
+        tensorboard_writer.add_scalar(METRICS + 'val_acc',  val_acc, t)
 
     model.load_state_dict(torch.load(MODEL_PATH))
     test_loss, test_acc = test(model, test_loader, f_loss, device)
