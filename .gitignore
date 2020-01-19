@@ -133,7 +133,7 @@ dmypy.json
 #perso
 
 *.npy
-DATA/
+/DATA/
 #*.csv
 *.pt
 log/*

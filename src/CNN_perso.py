@@ -254,10 +254,10 @@ class Net(nn.Module):
 
 
 class CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, l2_reg):
         super(CNN, self).__init__()
 
-        self.l2_reg = 0.001
+        self.l2_reg = l2_reg
 
         self.conv1 = nn.Conv2d(
                 in_channels=1,              # input height
@@ -291,7 +291,7 @@ class CNN(nn.Module):
         self.fc2 = nn.Linear(512, 2)   # fully connected layer, output 10 classes
 
     def penalty(self):
-        return self.l2_reg * (self.conv1.weight.norm(2) + self.conv2.weight.norm(2))
+        return self.l2_reg * (self.conv1.weight.norm(2) + self.conv2.weight.norm(2) + self.conv3.weight.norm(2) + self.fc1.weight.norm(2) + self.fc2.weight.norm(2))
 
     def forward(self, x):
         x = self.layer1(x)
@@ -378,7 +378,7 @@ def train(model, loader, f_loss, optimizer, device):
             optimizer.zero_grad()
             # model.zero_grad()
             loss.backward()
-            # model.penalty().backward()
+            model.penalty().backward()
             optimizer.step()   
     return tot_loss/N, correct/N
     
@@ -531,7 +531,7 @@ def main():
     #     print("target\n", targets)
 
  
-    model  = CNN()
+    model  = CNN(l2_reg = 0.01)
     print("Network architechture:\n",model)
 
     use_gpu = torch.cuda.is_available()
